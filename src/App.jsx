@@ -1,17 +1,21 @@
 import { useState, useEffect } from 'react';
-import Header from './components/Header';
-import About from './components/About';
-import Skills from './components/Skills';
+import { Routes, Route } from 'react-router-dom';
+
+import NavBar from './components/NavBar';
+import Home from './components/Home';
+import Projects from './components/Projects';
+import Contact from './components/Contact';
+import NotFound from './components/NotFound';
 import Footer from './components/Footer';
 
 function App() {
   const [userName] = useState("Rudra Patel");
   const [userTitle] = useState("Aspiring AI & ML Engineer");
 
-  // Theme Color Prop for Header (State to demonstrate React reactivity when props change)
+  // Theme Color Prop for Header
   const [themeColor, setThemeColor] = useState('#a855f7');
 
-  // Dark/Light Theme Switching
+  // Dark/Light Theme Switching — useState used meaningfully via NavBar toggle
   const [isLightMode, setIsLightMode] = useState(false);
 
   useEffect(() => {
@@ -36,19 +40,19 @@ function App() {
     root.style.setProperty('--accent-color', themeColor);
   }, [themeColor]);
 
-  // Skill array passed as prop to Skills component
+  // Skill array passed as prop to Home → Skills component
   const [skills] = useState([
-    "React.js",
-    "Python",
-    "Machine Learning",
-    "JavaScript (ES6+)",
-    "Vite",
-    "HTML5 & CSS3",
-    "Node.js & Express",
-    "Git & GitHub Workflow",
-    "Tailwind CSS"
+    "🐍 Python",
+    "🤖 Artificial Intelligence",
+    "🧠 Machine Learning",
+    "⚛️ React.js",
+    "🌐 HTML5 & CSS3",
+    "🟨 JavaScript (ES6+)",
+    "🟩 Node.js & Express",
+    "🍃 MongoDB",
+    "🔧 Git & GitHub",
+    "🎨 Tailwind CSS",
   ]);
-
 
   const colorThemes = [
     { name: 'Purple', value: '#a855f7' },
@@ -60,16 +64,8 @@ function App() {
 
   return (
     <>
-      {/* Control Panel / Theme Settings (Dynamic Props demonstration) */}
+      {/* Accent color picker bar */}
       <div className="settings-bar">
-        <button
-          type="button"
-          className="settings-btn"
-          onClick={() => setIsLightMode(!isLightMode)}
-        >
-          {isLightMode ? '🌙 Switch to Dark Theme' : '☀️ Switch to Light Theme'}
-        </button>
-
         <div className="color-picker-container">
           <span style={{ fontSize: '14px', fontWeight: '500', opacity: 0.85 }}>Accent Theme:</span>
           {colorThemes.map((theme) => (
@@ -86,15 +82,27 @@ function App() {
         </div>
       </div>
 
-      <main className="main-content">
-        {/* Passer name, title, and themeColor custom highlights as props */}
-        <Header name={userName} title={userTitle} themeColor={themeColor} />
+      {/* Sticky NavBar with theme toggle and route links */}
+      <NavBar isLightMode={isLightMode} onToggleTheme={() => setIsLightMode(prev => !prev)} />
 
-        <About />
-
-        {/* Pass array of skills as a prop */}
-        <Skills skillList={skills} />
-      </main>
+      {/* Client-side Routes — no full page reload */}
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Home
+              name={userName}
+              title={userTitle}
+              themeColor={themeColor}
+              skills={skills}
+            />
+          }
+        />
+        <Route path="/projects" element={<Projects />} />
+        <Route path="/contact" element={<Contact />} />
+        {/* 404 catch-all route */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
 
       <Footer />
     </>
