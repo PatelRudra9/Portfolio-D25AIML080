@@ -1,95 +1,142 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
-const projectList = [
-    {
-        id: 1,
-        emoji: '💼',
-        title: 'Developer Portfolio',
-        description: 'A responsive React portfolio app built with Vite, featuring dynamic props, theme switching, and reusable components.',
-        tech: ['React', 'Vite', 'CSS3'],
-        link: 'https://github.com/PatelRudra9/Portfolio-D25AIML080',
-    },
-    {
-        id: 2,
-        emoji: '🤖',
-        title: 'AI Fashion Advisor',
-        description: 'An AI-powered application that provides personalised fashion recommendations using machine learning models.',
-        tech: ['Python', 'Machine Learning', 'AI'],
-        link: '#',
-    },
-    {
-        id: 3,
-        emoji: '📋',
-        title: 'Task Manager App',
-        description: 'A full-stack task management system with user authentication, CRUD operations, and a clean dashboard UI.',
-        tech: ['Node.js', 'Express', 'MongoDB'],
-        link: '#',
-    },
-    {
-        id: 4,
-        emoji: '🧠',
-        title: 'ML Predictor',
-        description: 'A machine learning model pipeline for predictive analytics, built and trained with real-world datasets.',
-        tech: ['Python', 'Scikit-learn', 'Pandas'],
-        link: '#',
-    },
-];
+function Spinner() {
+    return (
+        <div className="spinner-container">
+            <div className="spinner"></div>
+            <p className="spinner-text">Fetching repositories...</p>
+        </div>
+    );
+}
+
+function ErrorMessage({ onRetry }) {
+    return (
+        <div className="error-box">
+            <div className="error-text-title">
+                <span>❌</span> Failed to load repositories.
+            </div>
+            <div className="error-text-subtitle">Please try again.</div>
+            {onRetry && (
+                <button onClick={onRetry} className="error-retry-btn">
+                    Retry
+                </button>
+            )}
+        </div>
+    );
+}
 
 function Projects() {
-    const [filter, setFilter] = useState('All');
+    const [repos, setRepos] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
 
-    const techFilters = ['All', 'React', 'Python', 'Node.js'];
+    const fetchRepos = useCallback(() => {
+        // Avoid synchronous state changes inside useEffect to prevent cascading renders
+        Promise.resolve().then(() => {
+            setLoading(true);
+            setError(null);
+        });
+        fetch('https://api.github.com/users/PatelRudra9/repos')
+            .then((res) => {
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                return res.json();
+            })
+            .then((data) => {
+                if (Array.isArray(data)) {
+                    setRepos(data);
+                } else {
+                    throw new Error("Invalid format received from API");
+                }
+            })
+            .catch((err) => {
+                setError(err.message);
+            })
+            .finally(() => {
+                setLoading(false);
+            });
+    }, []);
 
-    const filtered = filter === 'All'
-        ? projectList
-        : projectList.filter(p => p.tech.some(t => t.startsWith(filter)));
+    useEffect(() => {
+        fetchRepos();
+    }, [fetchRepos]);
+
+    // Filter repositories based on the search query
+    const filteredRepos = repos.filter((repo) =>
+        repo.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     return (
         <main className="main-content">
             <section className="section-container projects-section">
-                <div className="section-header">
-                    <span className="section-subtitle">What I've built</span>
-                    <h2 className="section-title">My Projects</h2>
-                    <div className="section-divider"></div>
-                </div>
 
-                {/* useState #1 — filter toggle for project categories */}
-                <div className="projects-filter-bar">
-                    {techFilters.map(f => (
-                        <button
-                            key={f}
-                            type="button"
-                            className={`filter-btn ${filter === f ? 'active' : ''}`}
-                            onClick={() => setFilter(f)}
-                        >
-                            {f}
-                        </button>
-                    ))}
-                </div>
+                <div className="projects-container-card">
+                    <div className="projects-card-header">
+                        <span className="projects-card-subtitle">PORTFOLIO HIGHLIGHTS</span>
+                        <h2 className="projects-card-title">My GitHub Projects</h2>
+                        <p className="projects-card-description">
+                            A selection of my recent work, showcasing practical development, UI design, and problem-solving across full-stack projects.
+                        </p>
+                    </div>
 
-                <div className="projects-grid">
-                    {filtered.map(project => (
-                        <div key={project.id} className="project-card">
-                            <div className="project-card-top">
-                                <span className="project-emoji">{project.emoji}</span>
-                                <h3 className="project-title">{project.title}</h3>
+                    {loading ? (
+                        <Spinner />
+                    ) : error ? (
+                        <ErrorMessage message={error} onRetry={fetchRepos} />
+                    ) : (
+                        <>
+                            {/* Search input to filter repositories */}
+                            <div className="search-bar-container" style={{ width: '100%' }}>
+                                <input
+                                    type="text"
+                                    placeholder="🔍 Search repositories by name..."
+                                    className="search-input"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                />
                             </div>
-                            <p className="project-description">{project.description}</p>
-                            <div className="project-tech-tags">
-                                {project.tech.map(t => (
-                                    <span key={t} className="tech-tag">{t}</span>
-                                ))}
-                            </div>
-                            <a
-                                href={project.link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="project-link-btn"
-                            >
-                                View Project →
-                            </a>
-                        </div>
-                    ))}
+
+                            {filteredRepos.length === 0 ? (
+                                <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                                    <p>No repositories found matching "{searchQuery}"</p>
+                                </div>
+                            ) : (
+                                <div className="projects-grid" style={{ width: '100%', marginTop: '20px' }}>
+                                    {filteredRepos.map((repo) => (
+                                        <div key={repo.id} className="project-card" style={{ textAlign: 'left' }}>
+                                            <div className="project-card-top">
+                                                <span className="project-emoji">📂</span>
+                                                <h3 className="project-title" style={{ flex: 1 }}>{repo.name}</h3>
+                                                <div className="repo-star-badge">
+                                                    ⭐ {repo.stargazers_count}
+                                                </div>
+                                            </div>
+                                            <p className="project-description">
+                                                {repo.description || "No description provided."}
+                                            </p>
+                                            <div className="project-tech-tags">
+                                                {repo.language && (
+                                                    <span className="tech-tag">{repo.language}</span>
+                                                )}
+                                                <span className="tech-tag">Stars: {repo.stargazers_count}</span>
+                                                <span className="tech-tag">Forks: {repo.forks_count}</span>
+                                            </div>
+                                            <a
+                                                href={repo.html_url}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="project-link-btn"
+                                            >
+                                                View on GitHub →
+                                            </a>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    )}
                 </div>
             </section>
         </main>

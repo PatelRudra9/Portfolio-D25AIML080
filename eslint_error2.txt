@@ -1,0 +1,8 @@
+﻿
+C:\Users\Dell\OneDrive\Desktop\MY_Portfolio\src\components\Projects.jsx
+  12:25  error    'message' is defined but never used                                                                 no-unused-vars
+  63:9   warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/set-state-in-effect')
+
+Γ£û 2 problems (1 error, 1 warning)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

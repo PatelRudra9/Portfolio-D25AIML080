@@ -1,16 +1,32 @@
-# React + Vite
+# Patel Rudra's Developer Portfolio - Practical 3 API Integration
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This React + Vite developer portfolio features dynamic styling and API integration.
 
-Currently, two official plugins are available:
+## Practical 3: API Integration & Data Rendering
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The **Projects** page is designed to consume data dynamically from the GitHub REST API and manage asynchronous loading/error states.
 
-## React Compiler
+### Features
+1. **GitHub API Integration**: Fetches public repositories for `PatelRudra9` via `https://api.github.com/users/PatelRudra9/repos`.
+2. **Conditional Rendering**:
+   - **Loading State**: Displays a refined, animated spinner while fetching is active.
+   - **Error State**: Displays a custom Error Message warning box if network issues occur or the API endpoint is unavailable.
+3. **Interactive Testing Utility**: Included buttons to toggle the API URL between a **Happy Path** (valid endpoint) and a **Break URL** (invalid endpoint) to easily demonstrate error handling and testing.
+4. **Retry Functionality**: A "Retry Connection" button on the error panel permits triggering the request again.
+5. **Search Filter**: A responsive input bar that filters repositories by name instantly.
+6. **Detailed Repository Cards**: Renders repository name, description, primary coding language, fork count, star count (`stargazers_count` with a ⭐ icon), and a link to view the repo directly on GitHub.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Setup & Run
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Start the local server:
+   ```bash
+   npm run dev
+   ```
+   Or build for production:
+   ```bash
+   npm run build
+   ```
 
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
