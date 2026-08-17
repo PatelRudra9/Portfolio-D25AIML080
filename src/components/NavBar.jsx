@@ -27,6 +27,14 @@ function NavBar({ isLightMode, onToggleTheme }) {
                 </li>
                 <li>
                     <NavLink
+                        to="/tasks"
+                        className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
+                    >
+                        📋 Tasks API
+                    </NavLink>
+                </li>
+                <li>
+                    <NavLink
                         to="/contact"
                         className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
                     >

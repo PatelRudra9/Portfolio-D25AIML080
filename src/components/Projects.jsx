@@ -73,13 +73,7 @@ function Projects() {
             <section className="section-container projects-section">
 
                 <div className="projects-container-card">
-                    <div className="projects-card-header">
-                        <span className="projects-card-subtitle">PORTFOLIO HIGHLIGHTS</span>
-                        <h2 className="projects-card-title">My GitHub Projects</h2>
-                        <p className="projects-card-description">
-                            A selection of my recent work, showcasing practical development, UI design, and problem-solving across full-stack projects.
-                        </p>
-                    </div>
+
 
                     {loading ? (
                         <Spinner />

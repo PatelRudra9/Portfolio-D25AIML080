@@ -5,6 +5,8 @@ import NavBar from './components/NavBar';
 import Home from './components/Home';
 import Projects from './components/Projects';
 import Contact from './components/Contact';
+import TaskManager from './components/TaskManager';
+import Certificates from './components/Certificates';
 import NotFound from './components/NotFound';
 import Footer from './components/Footer';
 
@@ -100,6 +102,8 @@ function App() {
         />
         <Route path="/projects" element={<Projects />} />
         <Route path="/contact" element={<Contact />} />
+        <Route path="/tasks" element={<TaskManager />} />
+        <Route path="/certificates" element={<Certificates />} />
         {/* 404 catch-all route */}
         <Route path="*" element={<NotFound />} />
       </Routes>
