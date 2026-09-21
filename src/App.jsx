@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 
 import NavBar from './components/NavBar';
 import Home from './components/Home';
 import Projects from './components/Projects';
 import Contact from './components/Contact';
 import TaskManager from './components/TaskManager';
+import AuthPage from './components/AuthPage';
 import Certificates from './components/Certificates';
 import NotFound from './components/NotFound';
 import Footer from './components/Footer';
@@ -19,6 +20,28 @@ function App() {
 
   // Dark/Light Theme Switching — useState used meaningfully via NavBar toggle
   const [isLightMode, setIsLightMode] = useState(false);
+
+  // Auth state
+  const [authUser, setAuthUser] = useState(null);
+  const [authToken, setAuthToken] = useState(null);
+
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Check for existing auth on mount
+  useEffect(() => {
+    const token = localStorage.getItem('tm_token');
+    const user = localStorage.getItem('tm_user');
+    if (token && user) {
+      try {
+        setAuthUser(JSON.parse(user));
+        setAuthToken(token);
+      } catch {
+        localStorage.removeItem('tm_token');
+        localStorage.removeItem('tm_user');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -64,6 +87,24 @@ function App() {
     { name: 'Pink', value: '#ec4899' },
   ];
 
+  // Auth handlers
+  const handleLogin = useCallback((user, token) => {
+    setAuthUser(user);
+    setAuthToken(token);
+    navigate('/tasks');
+  }, [navigate]);
+
+  const handleLogout = useCallback(() => {
+    setAuthUser(null);
+    setAuthToken(null);
+    localStorage.removeItem('tm_token');
+    localStorage.removeItem('tm_user');
+    // If on /tasks, stay there to show login page
+    if (location.pathname === '/tasks') {
+      // Force re-render — the route will show AuthPage
+    }
+  }, [location.pathname]);
+
   return (
     <>
       {/* Accent color picker bar */}
@@ -102,7 +143,14 @@ function App() {
         />
         <Route path="/projects" element={<Projects />} />
         <Route path="/contact" element={<Contact />} />
-        <Route path="/tasks" element={<TaskManager />} />
+        <Route
+          path="/tasks"
+          element={
+            authUser && authToken
+              ? <TaskManager onLogout={handleLogout} />
+              : <AuthPage onLogin={handleLogin} />
+          }
+        />
         <Route path="/certificates" element={<Certificates />} />
         {/* 404 catch-all route */}
         <Route path="*" element={<NotFound />} />

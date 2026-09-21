@@ -4,6 +4,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
+const { authMiddleware } = require('./middleware/auth');
+const authRoutes = require('./routes/auth');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -20,7 +23,7 @@ mongoose.connect(MONGO_URI, {
 });
 
 // ─────────────────────────────────────────────
-//  Task Schema (extended with status & timestamps)
+//  Task Schema (extended with userId)
 // ─────────────────────────────────────────────
 const taskSchema = new mongoose.Schema({
     title: { type: String, required: true },
@@ -28,19 +31,21 @@ const taskSchema = new mongoose.Schema({
     status: { type: String, enum: ['pending', 'completed', 'deleted'], default: 'pending' },
     completedAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 }, { timestamps: true });
 
 const Task = mongoose.model('Task', taskSchema);
 
 // ─────────────────────────────────────────────
-//  Activity Log Schema
+//  Activity Log Schema (extended with userId)
 // ─────────────────────────────────────────────
 const activityLogSchema = new mongoose.Schema({
     taskId: { type: String, required: true },
     taskTitle: { type: String, required: true },
-    action: { type: String, required: true }, // created | completed | reopened | updated | deleted
+    action: { type: String, required: true },
     details: { type: String, default: '' },
     timestamp: { type: Date, default: Date.now },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 });
 
 const ActivityLog = mongoose.model('ActivityLog', activityLogSchema);
@@ -53,7 +58,7 @@ app.use(express.json());
 // CORS
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     if (req.method === 'OPTIONS') return res.sendStatus(200);
     next();
@@ -65,7 +70,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// Content-Type validation
+// Content-Type validation (skip for auth routes that may be GET)
 app.use((req, res, next) => {
     if (['POST', 'PUT'].includes(req.method)) {
         const contentType = req.headers['content-type'] || '';
@@ -78,6 +83,11 @@ app.use((req, res, next) => {
     }
     next();
 });
+
+// ─────────────────────────────────────────────
+//  Auth Routes (public — no middleware)
+// ─────────────────────────────────────────────
+app.use('/auth', authRoutes);
 
 // ─────────────────────────────────────────────
 //  Validate Task ID
@@ -99,7 +109,7 @@ const mapTask = (d) => ({
     title: d.title,
     description: d.description,
     status: d.status,
-    completed: d.status === 'completed', // backward compat
+    completed: d.status === 'completed',
     completedAt: d.completedAt,
     deletedAt: d.deletedAt,
     createdAt: d.createdAt,
@@ -108,46 +118,51 @@ const mapTask = (d) => ({
 });
 
 // ─────────────────────────────────────────────
-//  TASK ROUTES
+//  TASK ROUTES (all protected with authMiddleware)
 // ─────────────────────────────────────────────
 
 // GET /tasks  (optional ?status=pending|completed|deleted|all)
-app.get('/tasks', async (req, res, next) => {
+app.get('/tasks', authMiddleware, async (req, res, next) => {
     try {
         const statusFilter = req.query.status;
-        const query = (statusFilter && statusFilter !== 'all')
-            ? { status: statusFilter }
-            : {};
+        const query = { userId: req.userId };
+        if (statusFilter && statusFilter !== 'all') {
+            query.status = statusFilter;
+        }
         const docs = await Task.find(query).sort({ createdAt: 1 }).lean();
         res.status(200).json({ success: true, count: docs.length, data: docs.map(mapTask) });
     } catch (err) { next(err); }
 });
 
 // GET /tasks/:id
-app.get('/tasks/:id', validateTaskId, async (req, res, next) => {
+app.get('/tasks/:id', authMiddleware, validateTaskId, async (req, res, next) => {
     try {
-        const doc = await Task.findById(req.taskId).lean();
+        const doc = await Task.findOne({ _id: req.taskId, userId: req.userId }).lean();
         if (!doc) return res.status(404).json({ error: 'Not Found', message: `Task ${req.taskId} not found.` });
         res.status(200).json({ success: true, data: mapTask(doc) });
     } catch (err) { next(err); }
 });
 
 // POST /tasks → create
-app.post('/tasks', async (req, res, next) => {
+app.post('/tasks', authMiddleware, async (req, res, next) => {
     try {
         const { title, description } = req.body;
         if (!title || typeof title !== 'string' || title.trim() === '') {
             return res.status(400).json({ error: 'Validation Error', message: '"title" is required.' });
         }
-        const doc = await Task.create({ title: title.trim(), description: description ? String(description).trim() : '' });
+        const doc = await Task.create({
+            title: title.trim(),
+            description: description ? String(description).trim() : '',
+            userId: req.userId,
+        });
         res.status(201).json({ success: true, message: 'Task created successfully.', data: mapTask(doc) });
     } catch (err) { next(err); }
 });
 
 // PUT /tasks/:id → update (blocked if deleted)
-app.put('/tasks/:id', validateTaskId, async (req, res, next) => {
+app.put('/tasks/:id', authMiddleware, validateTaskId, async (req, res, next) => {
     try {
-        const existing = await Task.findById(req.taskId).lean();
+        const existing = await Task.findOne({ _id: req.taskId, userId: req.userId }).lean();
         if (!existing) return res.status(404).json({ error: 'Not Found', message: `Task ${req.taskId} not found.` });
         if (existing.status === 'completed') {
             return res.status(403).json({ error: 'Forbidden', message: 'Cannot update a completed task.' });
@@ -180,16 +195,20 @@ app.put('/tasks/:id', validateTaskId, async (req, res, next) => {
             }
         }
 
-        const doc = await Task.findByIdAndUpdate(req.taskId, update, { new: true, runValidators: true }).lean();
+        const doc = await Task.findOneAndUpdate(
+            { _id: req.taskId, userId: req.userId },
+            update,
+            { new: true, runValidators: true }
+        ).lean();
         res.status(200).json({ success: true, message: 'Task updated successfully.', data: mapTask(doc) });
     } catch (err) { next(err); }
 });
 
 // DELETE /tasks/:id → SOFT DELETE
-app.delete('/tasks/:id', validateTaskId, async (req, res, next) => {
+app.delete('/tasks/:id', authMiddleware, validateTaskId, async (req, res, next) => {
     try {
-        const doc = await Task.findByIdAndUpdate(
-            req.taskId,
+        const doc = await Task.findOneAndUpdate(
+            { _id: req.taskId, userId: req.userId },
             { status: 'deleted', deletedAt: new Date() },
             { new: true }
         ).lean();
@@ -199,25 +218,31 @@ app.delete('/tasks/:id', validateTaskId, async (req, res, next) => {
 });
 
 // ─────────────────────────────────────────────
-//  ACTIVITY LOG ROUTES
+//  ACTIVITY LOG ROUTES (protected)
 // ─────────────────────────────────────────────
 
 // GET /logs
-app.get('/logs', async (req, res, next) => {
+app.get('/logs', authMiddleware, async (req, res, next) => {
     try {
-        const logs = await ActivityLog.find().sort({ timestamp: -1 }).limit(200).lean();
+        const logs = await ActivityLog.find({ userId: req.userId }).sort({ timestamp: -1 }).limit(200).lean();
         res.status(200).json({ success: true, count: logs.length, data: logs });
     } catch (err) { next(err); }
 });
 
 // POST /logs → create log entry
-app.post('/logs', async (req, res, next) => {
+app.post('/logs', authMiddleware, async (req, res, next) => {
     try {
         const { taskId, taskTitle, action, details } = req.body;
         if (!taskId || !taskTitle || !action) {
             return res.status(400).json({ error: 'Validation Error', message: 'taskId, taskTitle, and action are required.' });
         }
-        const log = await ActivityLog.create({ taskId, taskTitle, action, details: details || '' });
+        const log = await ActivityLog.create({
+            taskId,
+            taskTitle,
+            action,
+            details: details || '',
+            userId: req.userId,
+        });
         res.status(201).json({ success: true, data: log });
     } catch (err) { next(err); }
 });
@@ -244,7 +269,8 @@ app.use((err, req, res, next) => {
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`Task Manager API running on http://localhost:${PORT}`);
-        console.log('Endpoints: GET|POST /tasks, GET|PUT|DELETE /tasks/:id, GET|POST /logs');
+        console.log('Endpoints: POST /auth/register, POST /auth/login, POST /auth/forgot-password, POST /auth/reset-password');
+        console.log('Protected: GET|POST /tasks, GET|PUT|DELETE /tasks/:id, GET|POST /logs');
     });
 }
 

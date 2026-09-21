@@ -6,6 +6,21 @@ import autoTable from 'jspdf-autotable';
 const API = '/api/tasks';
 const LOGS_API = '/api/logs';
 
+// ── Auth helper ───────────────────────────────────────────────────────────────
+const getAuthHeaders = () => {
+    const token = localStorage.getItem('tm_token');
+    return {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+};
+
+const getUser = () => {
+    try {
+        return JSON.parse(localStorage.getItem('tm_user'));
+    } catch { return null; }
+};
+
 // ── Toast helper ──────────────────────────────────────────────────────────────
 const Toast = Swal.mixin({
     toast: true,
@@ -33,7 +48,7 @@ const postLog = async (taskId, taskTitle, action, details = '') => {
     try {
         await fetch(LOGS_API, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ taskId, taskTitle, action, details }),
         });
     } catch { /* silent fail */ }
@@ -42,7 +57,7 @@ const postLog = async (taskId, taskTitle, action, details = '') => {
 // ── Icon components (Font Awesome) ────────────────────────────────────────────
 const Icon = ({ name, style }) => <i className={`fas fa-${name}`} style={style}></i>;
 
-function TaskManager() {
+function TaskManager({ onLogout }) {
     // ── State ──────────────────────────────────────────────────────────────────
     const [tasks, setTasks] = useState([]);
     const [logs, setLogs] = useState([]);
@@ -58,10 +73,23 @@ function TaskManager() {
     const [activeTab, setActiveTab] = useState('pending');
     const [showLogs, setShowLogs] = useState(false);
 
+    const user = getUser();
+
+    // ── Handle 401 (auto-logout) ───────────────────────────────────────────────
+    const handle401 = useCallback((res) => {
+        if (res.status === 401) {
+            showToast('error', 'Session expired. Please log in again.');
+            if (onLogout) onLogout();
+            return true;
+        }
+        return false;
+    }, [onLogout]);
+
     // ── Fetch tasks ────────────────────────────────────────────────────────────
     const fetchTasks = useCallback(async () => {
         try {
-            const res = await fetch(`${API}?status=all`);
+            const res = await fetch(`${API}?status=all`, { headers: getAuthHeaders() });
+            if (handle401(res)) return;
             if (!res.ok) throw new Error('fetch failed');
             const json = await res.json();
             setTasks(json.data || []);
@@ -73,12 +101,12 @@ function TaskManager() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [handle401]);
 
     // ── Fetch logs ─────────────────────────────────────────────────────────────
     const fetchLogs = useCallback(async () => {
         try {
-            const res = await fetch(LOGS_API);
+            const res = await fetch(LOGS_API, { headers: getAuthHeaders() });
             if (res.ok) {
                 const json = await res.json();
                 setLogs(json.data || []);
@@ -92,13 +120,14 @@ function TaskManager() {
     useEffect(() => {
         const interval = setInterval(async () => {
             try {
-                const res = await fetch(API, { method: 'GET' });
+                const res = await fetch(API, { method: 'GET', headers: getAuthHeaders() });
+                if (handle401(res)) return;
                 setBackendOnline(res.ok);
                 if (res.ok) setError('');
             } catch { setBackendOnline(false); }
         }, 10000);
         return () => clearInterval(interval);
-    }, []);
+    }, [handle401]);
 
     // ── Create task ────────────────────────────────────────────────────────────
     const handleCreate = async (e) => {
@@ -108,9 +137,10 @@ function TaskManager() {
         try {
             const res = await fetch(API, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ title: title.trim(), description: description.trim() }),
             });
+            if (handle401(res)) return;
             if (!res.ok) throw new Error('Create failed');
             const json = await res.json();
             setTasks(prev => [...prev, json.data]);
@@ -135,9 +165,10 @@ function TaskManager() {
         try {
             const res = await fetch(`${API}/${task.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ status: newStatus }),
             });
+            if (handle401(res)) return;
             if (!res.ok) throw new Error('Update failed');
             const json = await res.json();
             setTasks(prev => prev.map(t => t.id === task.id ? json.data : t));
@@ -167,9 +198,10 @@ function TaskManager() {
         try {
             const res = await fetch(`${API}/${id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: getAuthHeaders(),
                 body: JSON.stringify({ title: editTitle.trim(), description: editDesc.trim() }),
             });
+            if (handle401(res)) return;
             if (!res.ok) throw new Error('Update failed');
             const json = await res.json();
             setTasks(prev => prev.map(t => t.id === id ? json.data : t));
@@ -200,7 +232,8 @@ function TaskManager() {
         if (!result.isConfirmed) return;
 
         try {
-            const res = await fetch(`${API}/${task.id}`, { method: 'DELETE' });
+            const res = await fetch(`${API}/${task.id}`, { method: 'DELETE', headers: getAuthHeaders() });
+            if (handle401(res)) return;
             if (!res.ok) throw new Error('Delete failed');
             const json = await res.json();
             setTasks(prev => prev.map(t => t.id === task.id ? json.data : t));
@@ -211,6 +244,25 @@ function TaskManager() {
         } catch (err) {
             setError('Failed to delete: ' + err.message);
             showToast('error', '❌ Failed to delete task');
+        }
+    };
+
+    // ── Logout handler ─────────────────────────────────────────────────────────
+    const handleLogout = async () => {
+        const result = await Swal.fire({
+            title: 'Log out?',
+            text: 'Are you sure you want to log out?',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonColor: '#e63946',
+            cancelButtonColor: '#4361ee',
+            confirmButtonText: '<i class="fas fa-sign-out-alt"></i> Log Out',
+            cancelButtonText: '<i class="fas fa-times"></i> Cancel',
+            background: '#1a1a2e',
+            color: '#e0e0ff',
+        });
+        if (result.isConfirmed && onLogout) {
+            onLogout();
         }
     };
 
@@ -328,11 +380,17 @@ function TaskManager() {
                         <div className="section-divider"></div>
                     </div>
 
-                    {/* Top bar: status + PDF + Logs */}
+                    {/* Top bar: user info + status + PDF + Logs + Logout */}
                     <div className="tm-topbar">
-                        <div className="tm-status-bar">
+                        <div className="tm-topbar-left">
                             <div className={`tm-status-dot ${backendOnline ? 'online' : 'offline'}`}></div>
                             <span className="tm-status-text">SYSTEM: {backendOnline ? 'CONNECTED' : 'DISCONNECTED'}</span>
+                            {user && (
+                                <span className="tm-user-badge">
+                                    <Icon name="user-circle" style={{ marginRight: 6 }} />
+                                    {user.fullName}
+                                </span>
+                            )}
                         </div>
                         <div className="tm-topbar-actions">
                             <button className="tm-logs-btn" onClick={() => { setShowLogs(p => !p); fetchLogs(); }}>
@@ -340,6 +398,9 @@ function TaskManager() {
                             </button>
                             <button className="tm-pdf-btn" onClick={exportPDF} disabled={tasks.length === 0}>
                                 <Icon name="file-pdf" /> Export PDF
+                            </button>
+                            <button className="tm-logout-btn" onClick={handleLogout}>
+                                <Icon name="sign-out-alt" /> Logout
                             </button>
                         </div>
                     </div>
