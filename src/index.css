@@ -1064,6 +1064,69 @@ body {
   color: var(--text-muted);
 }
 
+/* --- Contact form: inline field error --- */
+.form-error {
+  font-size: 13px;
+  color: #ef4444;
+  font-weight: 500;
+}
+
+/* --- Contact form: submission error banner --- */
+.contact-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+[data-theme='light'] .contact-error {
+  color: #b91c1c;
+}
+
+/* --- Contact form: honest setup disclaimer --- */
+.contact-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--accent-color);
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.contact-disclaimer code {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  background: var(--bg-base);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--accent-color);
+}
+
+/* --- Contact form: submit button spinner --- */
+.btn-spinner {
+  display: inline-block;
+  width: 15px;
+  height: 15px;
+  margin-right: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  vertical-align: -2px;
+  animation: spin 0.7s linear infinite;
+}
+
 /* --- 404 NotFound Section --- */
 .not-found-section {
   display: flex;
@@ -1441,8 +1504,8 @@ body {
 /* ── Glowing HUD Stats Dashboard ─────────────────────── */
 .tm-stats-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
   margin-bottom: 48px;
   perspective: 1000px;
 }
@@ -1496,6 +1559,24 @@ body {
 .tm-stat-pending:hover {
   box-shadow: 0 20px 40px rgba(245, 158, 11, 0.08);
   border-color: rgba(245, 158, 11, 0.3);
+}
+
+.tm-stat-inprogress {
+  border-left: 3px solid #4361ee;
+}
+
+.tm-stat-inprogress:hover {
+  box-shadow: 0 20px 40px rgba(67, 97, 238, 0.08);
+  border-color: rgba(67, 97, 238, 0.3);
+}
+
+.tm-stat-overdue {
+  border-left: 3px solid #e63946;
+}
+
+.tm-stat-overdue:hover {
+  box-shadow: 0 20px 40px rgba(230, 57, 70, 0.08);
+  border-color: rgba(230, 57, 70, 0.3);
 }
 
 .tm-stat-info {
@@ -1943,6 +2024,143 @@ body {
   color: #f59e0b;
   background: rgba(245, 158, 11, 0.08);
   border: 1px solid rgba(245, 158, 11, 0.2);
+}
+
+.badge-inprogress {
+  color: #4361ee;
+  background: rgba(67, 97, 238, 0.08);
+  border: 1px solid rgba(67, 97, 238, 0.2);
+}
+
+.badge-overdue {
+  color: #e63946;
+  background: rgba(230, 57, 70, 0.08);
+  border: 1px solid rgba(230, 57, 70, 0.25);
+}
+
+/* ── Priority badge (Fig 7) ───────────────────────────────────────────────── */
+.tm-priority-badge {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 5px 12px;
+  border-radius: 30px;
+  color: #0a0a14;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ── Form enhancements: priority + due date (Figs 7, 10) ──────────────────── */
+.tm-group-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.tm-field-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  display: block;
+}
+
+.tm-select,
+.tm-date {
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.tm-date {
+  color-scheme: dark;
+}
+
+/* ── Export dialog modal (Fig 10) ─────────────────────────────────────────── */
+.tm-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 18, 0.72);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.tm-modal {
+  background: #14142b;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 460px;
+  padding: 28px;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+  animation: slideDown 0.25s ease;
+}
+
+.tm-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.tm-modal-header h3 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+}
+
+.tm-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  transition: var(--transition-smooth);
+}
+.tm-modal-close:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.06); }
+
+.tm-modal-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 20px;
+}
+
+.tm-export-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tm-export-group { display: flex; flex-direction: column; }
+
+.tm-export-note {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: rgba(67, 97, 238, 0.08);
+  border: 1px solid rgba(67, 97, 238, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 0;
+}
+
+.tm-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .tm-task-title {
@@ -2973,6 +3191,28 @@ body {
   border-top-color: white;
   border-radius: 50%;
   animation: spin 1s linear infinite;
+}
+
+/* ── Google Sign-In (Fig 5) ─────────────────────────────────────────────── */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-light);
+}
+.google-btn-container {
+  display: flex;
+  justify-content: center;
+  min-height: 44px;
 }
 
 .auth-reset-actions {

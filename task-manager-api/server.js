@@ -28,7 +28,9 @@ mongoose.connect(MONGO_URI, {
 const taskSchema = new mongoose.Schema({
     title: { type: String, required: true },
     description: { type: String, default: '' },
-    status: { type: String, enum: ['pending', 'completed', 'deleted'], default: 'pending' },
+    status: { type: String, enum: ['pending', 'inprogress', 'completed', 'deleted'], default: 'pending' },
+    priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+    dueDate: { type: Date, default: null },
     completedAt: { type: Date, default: null },
     deletedAt: { type: Date, default: null },
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
@@ -102,6 +104,15 @@ const validateTaskId = (req, res, next) => {
 };
 
 // ─────────────────────────────────────────────
+//  Helper: is a task overdue? (has a past due date and isn't completed/deleted)
+// ─────────────────────────────────────────────
+const isOverdue = (d) => {
+    if (!d.dueDate) return false;
+    if (d.status === 'completed' || d.status === 'deleted') return false;
+    return new Date(d.dueDate).getTime() < Date.now();
+};
+
+// ─────────────────────────────────────────────
 //  Helper: map doc to response shape
 // ─────────────────────────────────────────────
 const mapTask = (d) => ({
@@ -109,7 +120,10 @@ const mapTask = (d) => ({
     title: d.title,
     description: d.description,
     status: d.status,
+    priority: d.priority || 'medium',
+    dueDate: d.dueDate,
     completed: d.status === 'completed',
+    overdue: isOverdue(d),
     completedAt: d.completedAt,
     deletedAt: d.deletedAt,
     createdAt: d.createdAt,
@@ -121,14 +135,34 @@ const mapTask = (d) => ({
 //  TASK ROUTES (all protected with authMiddleware)
 // ─────────────────────────────────────────────
 
-// GET /tasks  (optional ?status=pending|completed|deleted|all)
+// GET /tasks  (optional ?status=pending|inprogress|completed|deleted|overdue|all
+//              optional ?from=YYYY-MM-DD&to=YYYY-MM-DD  → filter by createdAt range)
 app.get('/tasks', authMiddleware, async (req, res, next) => {
     try {
         const statusFilter = req.query.status;
         const query = { userId: req.userId };
-        if (statusFilter && statusFilter !== 'all') {
+
+        if (statusFilter === 'overdue') {
+            // Overdue = has a past dueDate and isn't completed/deleted
+            query.dueDate = { $lt: new Date() };
+            query.status = { $nin: ['completed', 'deleted'] };
+        } else if (statusFilter && statusFilter !== 'all') {
             query.status = statusFilter;
         }
+
+        // Optional date-range filter on createdAt (used by PDF export)
+        const from = req.query.from ? new Date(req.query.from) : null;
+        const to = req.query.to ? new Date(req.query.to) : null;
+        if (from && !isNaN(from)) {
+            query.createdAt = { ...(query.createdAt || {}), $gte: from };
+        }
+        if (to && !isNaN(to)) {
+            // Inclusive end-of-day
+            const endOfDay = new Date(to);
+            endOfDay.setHours(23, 59, 59, 999);
+            query.createdAt = { ...(query.createdAt || {}), $lte: endOfDay };
+        }
+
         const docs = await Task.find(query).sort({ createdAt: 1 }).lean();
         res.status(200).json({ success: true, count: docs.length, data: docs.map(mapTask) });
     } catch (err) { next(err); }
@@ -146,13 +180,29 @@ app.get('/tasks/:id', authMiddleware, validateTaskId, async (req, res, next) => 
 // POST /tasks → create
 app.post('/tasks', authMiddleware, async (req, res, next) => {
     try {
-        const { title, description } = req.body;
+        const { title, description, priority, dueDate, status } = req.body;
         if (!title || typeof title !== 'string' || title.trim() === '') {
             return res.status(400).json({ error: 'Validation Error', message: '"title" is required.' });
+        }
+        if (priority !== undefined && !['low', 'medium', 'high'].includes(priority)) {
+            return res.status(400).json({ error: 'Validation Error', message: '"priority" must be low, medium, or high.' });
+        }
+        if (status !== undefined && !['pending', 'inprogress'].includes(status)) {
+            return res.status(400).json({ error: 'Validation Error', message: '"status" must be pending or inprogress on create.' });
+        }
+        let parsedDue = null;
+        if (dueDate) {
+            parsedDue = new Date(dueDate);
+            if (isNaN(parsedDue)) {
+                return res.status(400).json({ error: 'Validation Error', message: '"dueDate" must be a valid date.' });
+            }
         }
         const doc = await Task.create({
             title: title.trim(),
             description: description ? String(description).trim() : '',
+            priority: priority || 'medium',
+            dueDate: parsedDue,
+            status: status || 'pending',
             userId: req.userId,
         });
         res.status(201).json({ success: true, message: 'Task created successfully.', data: mapTask(doc) });
@@ -171,9 +221,9 @@ app.put('/tasks/:id', authMiddleware, validateTaskId, async (req, res, next) => 
             return res.status(403).json({ error: 'Forbidden', message: 'Cannot update a deleted task.' });
         }
 
-        const { title, description, status } = req.body;
-        if (title === undefined && description === undefined && status === undefined) {
-            return res.status(400).json({ error: 'Validation Error', message: 'Provide at least one of: title, description, status.' });
+        const { title, description, status, priority, dueDate } = req.body;
+        if (title === undefined && description === undefined && status === undefined && priority === undefined && dueDate === undefined) {
+            return res.status(400).json({ error: 'Validation Error', message: 'Provide at least one of: title, description, status, priority, dueDate.' });
         }
 
         const update = {};
@@ -185,12 +235,25 @@ app.put('/tasks/:id', authMiddleware, validateTaskId, async (req, res, next) => 
             if (typeof description !== 'string') return res.status(400).json({ error: 'Validation Error', message: '"description" must be a string.' });
             update.description = description.trim();
         }
+        if (priority !== undefined) {
+            if (!['low', 'medium', 'high'].includes(priority)) return res.status(400).json({ error: 'Validation Error', message: '"priority" must be low, medium, or high.' });
+            update.priority = priority;
+        }
+        if (dueDate !== undefined) {
+            if (dueDate === null || dueDate === '') {
+                update.dueDate = null;
+            } else {
+                const parsed = new Date(dueDate);
+                if (isNaN(parsed)) return res.status(400).json({ error: 'Validation Error', message: '"dueDate" must be a valid date or null.' });
+                update.dueDate = parsed;
+            }
+        }
         if (status !== undefined) {
-            if (!['pending', 'completed'].includes(status)) return res.status(400).json({ error: 'Validation Error', message: '"status" must be pending or completed.' });
+            if (!['pending', 'inprogress', 'completed'].includes(status)) return res.status(400).json({ error: 'Validation Error', message: '"status" must be pending, inprogress, or completed.' });
             update.status = status;
             if (status === 'completed' && existing.status !== 'completed') {
                 update.completedAt = new Date();
-            } else if (status === 'pending') {
+            } else if (status !== 'completed') {
                 update.completedAt = null;
             }
         }
@@ -269,7 +332,7 @@ app.use((err, req, res, next) => {
 if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`Task Manager API running on http://localhost:${PORT}`);
-        console.log('Endpoints: POST /auth/register, POST /auth/login, POST /auth/forgot-password, POST /auth/reset-password');
+        console.log('Endpoints: POST /auth/register, POST /auth/login, POST /auth/google, POST /auth/forgot-password, POST /auth/reset-password');
         console.log('Protected: GET|POST /tasks, GET|PUT|DELETE /tasks/:id, GET|POST /logs');
     });
 }

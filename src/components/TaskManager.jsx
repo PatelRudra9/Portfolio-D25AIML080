@@ -43,6 +43,24 @@ const fmt = (dateStr) => {
     return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
 
+// ── Format date only (no time) ────────────────────────────────────────────────
+const fmtDateOnly = (dateStr) => {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return '—';
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
+// ── Human-readable status label (OVERDUE wins over the stored status) ────────
+const statusLabel = (t) => {
+    if (t.overdue) return 'OVERDUE';
+    if (t.status === 'inprogress') return 'IN PROGRESS';
+    return (t.status || '').toUpperCase();
+};
+
+// ── Priority colour for badges ────────────────────────────────────────────────
+const PRIORITY_COLOR = { high: '#e63946', medium: '#ffc107', low: '#4cc9a1' };
+
 // ── Log helper ────────────────────────────────────────────────────────────────
 const postLog = async (taskId, taskTitle, action, details = '') => {
     try {
@@ -63,15 +81,26 @@ function TaskManager({ onLogout }) {
     const [logs, setLogs] = useState([]);
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
+    const [priority, setPriority] = useState('medium');
+    const [dueDate, setDueDate] = useState('');
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [backendOnline, setBackendOnline] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [editTitle, setEditTitle] = useState('');
     const [editDesc, setEditDesc] = useState('');
+    const [editPriority, setEditPriority] = useState('medium');
+    const [editDueDate, setEditDueDate] = useState('');
     const [error, setError] = useState('');
     const [activeTab, setActiveTab] = useState('pending');
     const [showLogs, setShowLogs] = useState(false);
+
+    // Export dialog state (Fig 10)
+    const [showExport, setShowExport] = useState(false);
+    const [exportFrom, setExportFrom] = useState('');
+    const [exportTo, setExportTo] = useState('');
+    const [exportStatus, setExportStatus] = useState('all');
+    const [exporting, setExporting] = useState(false);
 
     const user = getUser();
 
@@ -138,7 +167,12 @@ function TaskManager({ onLogout }) {
             const res = await fetch(API, {
                 method: 'POST',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ title: title.trim(), description: description.trim() }),
+                body: JSON.stringify({
+                    title: title.trim(),
+                    description: description.trim(),
+                    priority,
+                    dueDate: dueDate || null,
+                }),
             });
             if (handle401(res)) return;
             if (!res.ok) throw new Error('Create failed');
@@ -147,6 +181,8 @@ function TaskManager({ onLogout }) {
             await postLog(json.data.id, json.data.title, 'created', `Task created at ${fmt(json.data.createdAt)}`);
             setTitle('');
             setDescription('');
+            setPriority('medium');
+            setDueDate('');
             fetchLogs();
             showToast('success', '✅ Task created successfully!');
             setActiveTab('pending');
@@ -158,10 +194,14 @@ function TaskManager({ onLogout }) {
         }
     };
 
-    // ── Toggle status ──────────────────────────────────────────────────────────
+    // ── Toggle status (cycles pending → in-progress → completed → pending) ────
     const toggleStatus = async (task) => {
         if (task.status === 'deleted') return;
-        const newStatus = task.status === 'completed' ? 'pending' : 'completed';
+        const nextStatus = { pending: 'inprogress', inprogress: 'completed', completed: 'pending' };
+        const newStatus = nextStatus[task.status] || 'pending';
+        const action = newStatus === 'completed' ? 'completed'
+            : newStatus === 'inprogress' ? 'started' : 'reopened';
+        const label = newStatus === 'inprogress' ? 'in progress' : newStatus;
         try {
             const res = await fetch(`${API}/${task.id}`, {
                 method: 'PUT',
@@ -172,11 +212,11 @@ function TaskManager({ onLogout }) {
             if (!res.ok) throw new Error('Update failed');
             const json = await res.json();
             setTasks(prev => prev.map(t => t.id === task.id ? json.data : t));
-            const action = newStatus === 'completed' ? 'completed' : 'reopened';
-            await postLog(task.id, task.title, action, `Marked as ${newStatus} at ${fmt(new Date())}`);
+            await postLog(task.id, task.title, action, `Marked as ${label} at ${fmt(new Date())}`);
             fetchLogs();
-            showToast('success', newStatus === 'completed' ? '🎉 Task marked as completed!' : '🔄 Task reopened!');
-            setActiveTab(newStatus === 'completed' ? 'completed' : 'pending');
+            showToast('success', newStatus === 'completed' ? '🎉 Task marked as completed!'
+                : newStatus === 'inprogress' ? '🚀 Task started!' : '🔄 Task reopened!');
+            setActiveTab(newStatus === 'completed' ? 'completed' : newStatus === 'inprogress' ? 'inprogress' : 'pending');
         } catch (err) {
             setError('Failed to update: ' + err.message);
             showToast('error', '❌ Status update failed');
@@ -188,9 +228,17 @@ function TaskManager({ onLogout }) {
         setEditingId(task.id);
         setEditTitle(task.title);
         setEditDesc(task.description || '');
+        setEditPriority(task.priority || 'medium');
+        setEditDueDate(task.dueDate ? task.dueDate.slice(0, 10) : '');
     };
 
-    const cancelEdit = () => { setEditingId(null); setEditTitle(''); setEditDesc(''); };
+    const cancelEdit = () => {
+        setEditingId(null);
+        setEditTitle('');
+        setEditDesc('');
+        setEditPriority('medium');
+        setEditDueDate('');
+    };
 
     const saveEdit = async (id) => {
         if (!editTitle.trim()) return;
@@ -199,7 +247,12 @@ function TaskManager({ onLogout }) {
             const res = await fetch(`${API}/${id}`, {
                 method: 'PUT',
                 headers: getAuthHeaders(),
-                body: JSON.stringify({ title: editTitle.trim(), description: editDesc.trim() }),
+                body: JSON.stringify({
+                    title: editTitle.trim(),
+                    description: editDesc.trim(),
+                    priority: editPriority,
+                    dueDate: editDueDate || null,
+                }),
             });
             if (handle401(res)) return;
             if (!res.ok) throw new Error('Update failed');
@@ -266,65 +319,90 @@ function TaskManager({ onLogout }) {
         }
     };
 
-    // ── PDF Export ─────────────────────────────────────────────────────────────
-    const exportPDF = () => {
+    // ── PDF Export (Fig 11) ───────────────────────────────────────────────────
+    // Accepts optional filters { from, to, status } from the export dialog (Fig 10).
+    const exportPDF = (filters = {}) => {
+        const { from, to, status: statusFilter = 'all' } = filters;
+
+        // Apply the same filters the dialog shows
+        let rows = [...tasks];
+        if (statusFilter === 'overdue') {
+            rows = rows.filter(t => t.overdue);
+        } else if (statusFilter !== 'all') {
+            rows = rows.filter(t => t.status === statusFilter);
+        }
+        if (from) {
+            const fromDate = new Date(from); fromDate.setHours(0, 0, 0, 0);
+            rows = rows.filter(t => t.createdAt && new Date(t.createdAt) >= fromDate);
+        }
+        if (to) {
+            const toDate = new Date(to); toDate.setHours(23, 59, 59, 999);
+            rows = rows.filter(t => t.createdAt && new Date(t.createdAt) <= toDate);
+        }
+
         const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
         const pageWidth = doc.internal.pageSize.getWidth();
 
-        // Header
+        // Header band
         doc.setFillColor(26, 26, 46);
-        doc.rect(0, 0, pageWidth, 22, 'F');
+        doc.rect(0, 0, pageWidth, 24, 'F');
         doc.setFontSize(18);
         doc.setTextColor(138, 99, 255);
-        doc.text('Task Manager Report', 14, 14);
+        doc.text('Task Management Report', 14, 15);
         doc.setFontSize(9);
         doc.setTextColor(160, 160, 184);
-        doc.text(`Generated: ${fmt(new Date())}`, pageWidth - 14, 14, { align: 'right' });
+        doc.text(`Generated on ${fmt(new Date())}`, pageWidth - 14, 15, { align: 'right' });
 
-        const sections = [
-            { label: 'Pending Tasks', status: 'pending', color: [255, 193, 7] },
-            { label: 'Completed Tasks', status: 'completed', color: [76, 201, 161] },
-            { label: 'Deleted Tasks', status: 'deleted', color: [230, 57, 70] },
-        ];
+        // Report meta: period + total (matches Fig 11)
+        let metaY = 33;
+        doc.setFontSize(11);
+        doc.setTextColor(220, 220, 240);
+        const periodLabel = (from || to)
+            ? `${from ? fmtDateOnly(from) : 'Start'} to ${to ? fmtDateOnly(to) : 'Today'}`
+            : 'All time';
+        doc.text(`Report Period: ${periodLabel}`, 14, metaY);
+        doc.text(`Total Tasks: ${rows.length}`, 14, metaY + 7);
 
-        let startY = 28;
-        sections.forEach(({ label, status, color }) => {
-            const filtered = tasks.filter(t => t.status === status);
-            doc.setFontSize(13);
-            doc.setTextColor(...color);
-            doc.text(label + ` (${filtered.length})`, 14, startY);
-
-            if (filtered.length === 0) {
-                doc.setFontSize(9);
-                doc.setTextColor(120, 120, 140);
-                doc.text('No tasks in this category.', 14, startY + 6);
-                startY += 16;
-                return;
-            }
-
+        if (rows.length === 0) {
+            doc.setFontSize(10);
+            doc.setTextColor(120, 120, 140);
+            doc.text('No tasks match the selected filters.', 14, metaY + 20);
+        } else {
             autoTable(doc, {
-                startY: startY + 4,
-                head: [['#', 'Title', 'Description', 'Status', 'Created At', 'Completed At', 'Deleted At']],
-                body: filtered.map((t, i) => [
-                    i + 1,
+                startY: metaY + 14,
+                head: [['Task', 'Status', 'Priority', 'Due Date', 'Created']],
+                body: rows.map((t) => [
                     t.title,
-                    t.description || '—',
-                    t.status.toUpperCase(),
-                    fmt(t.createdAt),
-                    fmt(t.completedAt),
-                    fmt(t.deletedAt),
+                    statusLabel(t),
+                    (t.priority || 'medium').toUpperCase(),
+                    t.dueDate ? fmtDateOnly(t.dueDate) : '—',
+                    t.createdAt ? fmtDateOnly(t.createdAt) : '—',
                 ]),
-                styles: { fillColor: [20, 20, 38], textColor: [220, 220, 240], fontSize: 8, cellPadding: 3 },
-                headStyles: { fillColor: color, textColor: [10, 10, 20], fontStyle: 'bold' },
+                styles: { fillColor: [20, 20, 38], textColor: [220, 220, 240], fontSize: 9, cellPadding: 4 },
+                headStyles: { fillColor: [67, 97, 238], textColor: [255, 255, 255], fontStyle: 'bold' },
                 alternateRowStyles: { fillColor: [28, 28, 50] },
                 margin: { left: 14, right: 14 },
                 theme: 'grid',
+                didParseCell: (data) => {
+                    // Colour-code the Status and Priority cells
+                    if (data.section === 'body' && data.column.index === 1) {
+                        const s = String(data.cell.raw);
+                        if (s === 'COMPLETED') data.cell.styles.textColor = [76, 201, 161];
+                        else if (s === 'IN PROGRESS') data.cell.styles.textColor = [67, 97, 238];
+                        else if (s === 'OVERDUE') data.cell.styles.textColor = [230, 57, 70];
+                        else data.cell.styles.textColor = [255, 193, 7];
+                    }
+                    if (data.section === 'body' && data.column.index === 2) {
+                        const p = String(data.cell.raw);
+                        if (p === 'HIGH') data.cell.styles.textColor = [230, 57, 70];
+                        else if (p === 'LOW') data.cell.styles.textColor = [76, 201, 161];
+                        else data.cell.styles.textColor = [255, 193, 7];
+                    }
+                },
             });
+        }
 
-            startY = doc.lastAutoTable.finalY + 12;
-        });
-
-        // Logs section
+        // Activity Log section (kept from before)
         if (logs.length > 0) {
             doc.addPage();
             doc.setFillColor(26, 26, 46);
@@ -344,27 +422,58 @@ function TaskManager({ onLogout }) {
             });
         }
 
-        doc.save(`tasks-report-${new Date().toISOString().slice(0, 10)}.pdf`);
+        // Footer: page numbers on every page
+        const total = doc.getNumberOfPages();
+        for (let i = 1; i <= total; i++) {
+            doc.setPage(i);
+            doc.setFontSize(8);
+            doc.setTextColor(140, 140, 160);
+            doc.text(
+                `This report was generated automatically by Task Manager Application.`,
+                14, doc.internal.pageSize.getHeight() - 8
+            );
+            doc.text(`Page ${i} of ${total}`, pageWidth - 14, doc.internal.pageSize.getHeight() - 8, { align: 'right' });
+        }
+
+        doc.save(`task-management-report-${new Date().toISOString().slice(0, 10)}.pdf`);
         showToast('success', '📄 PDF downloaded!');
+    };
+
+    // Run the export from the dialog, then close it
+    const handleExportSubmit = (e) => {
+        e.preventDefault();
+        setExporting(true);
+        // Small delay so the spinner paints before the synchronous PDF build
+        setTimeout(() => {
+            exportPDF({ from: exportFrom, to: exportTo, status: exportStatus });
+            setExporting(false);
+            setShowExport(false);
+        }, 150);
     };
 
     // ── Derived ────────────────────────────────────────────────────────────────
     const pendingTasks = tasks.filter(t => t.status === 'pending');
+    const inProgressTasks = tasks.filter(t => t.status === 'inprogress');
     const completedTasks = tasks.filter(t => t.status === 'completed');
     const deletedTasks = tasks.filter(t => t.status === 'deleted');
+    const overdueTasks = tasks.filter(t => t.overdue);
 
     const tabTasks = activeTab === 'pending' ? pendingTasks
-        : activeTab === 'completed' ? completedTasks
-            : deletedTasks;
+        : activeTab === 'inprogress' ? inProgressTasks
+            : activeTab === 'completed' ? completedTasks
+                : activeTab === 'overdue' ? overdueTasks
+                    : deletedTasks;
 
     const tabConfig = [
         { key: 'pending', label: 'Pending', icon: 'clock', count: pendingTasks.length, color: '#ffc107' },
+        { key: 'inprogress', label: 'In Progress', icon: 'spinner', count: inProgressTasks.length, color: '#4361ee' },
         { key: 'completed', label: 'Completed', icon: 'check-circle', count: completedTasks.length, color: '#4cc9a1' },
-        { key: 'deleted', label: 'Deleted', icon: 'trash-alt', count: deletedTasks.length, color: '#e63946' },
+        { key: 'overdue', label: 'Overdue', icon: 'exclamation-triangle', count: overdueTasks.length, color: '#e63946' },
+        { key: 'deleted', label: 'Deleted', icon: 'trash-alt', count: deletedTasks.length, color: '#888' },
     ];
 
-    const actionIconMap = { created: 'plus-circle', completed: 'check-circle', reopened: 'undo', updated: 'edit', deleted: 'trash-alt' };
-    const actionColorMap = { created: '#4cc9a1', completed: '#4361ee', reopened: '#ffc107', updated: '#a29bfe', deleted: '#e63946' };
+    const actionIconMap = { created: 'plus-circle', completed: 'check-circle', started: 'play-circle', reopened: 'undo', updated: 'edit', deleted: 'trash-alt' };
+    const actionColorMap = { created: '#4cc9a1', completed: '#4361ee', started: '#4361ee', reopened: '#ffc107', updated: '#a29bfe', deleted: '#e63946' };
 
     // ── Render ─────────────────────────────────────────────────────────────────
     return (
@@ -396,7 +505,7 @@ function TaskManager({ onLogout }) {
                             <button className="tm-logs-btn" onClick={() => { setShowLogs(p => !p); fetchLogs(); }}>
                                 <Icon name="history" /> {showLogs ? 'Hide' : 'Show'} Logs
                             </button>
-                            <button className="tm-pdf-btn" onClick={exportPDF} disabled={tasks.length === 0}>
+                            <button className="tm-pdf-btn" onClick={() => setShowExport(true)} disabled={tasks.length === 0}>
                                 <Icon name="file-pdf" /> Export PDF
                             </button>
                             <button className="tm-logout-btn" onClick={handleLogout}>
@@ -423,13 +532,6 @@ function TaskManager({ onLogout }) {
                                 </div>
                                 <div className="tm-stat-icon-wrapper"><Icon name="clipboard-list" style={{ fontSize: 22 }} /></div>
                             </div>
-                            <div className="tm-stat-card tm-stat-completed">
-                                <div className="tm-stat-info">
-                                    <span className="tm-stat-number">{completedTasks.length}</span>
-                                    <span className="tm-stat-label">Completed</span>
-                                </div>
-                                <div className="tm-stat-icon-wrapper"><Icon name="check-circle" style={{ fontSize: 22 }} /></div>
-                            </div>
                             <div className="tm-stat-card tm-stat-pending">
                                 <div className="tm-stat-info">
                                     <span className="tm-stat-number">{pendingTasks.length}</span>
@@ -437,12 +539,26 @@ function TaskManager({ onLogout }) {
                                 </div>
                                 <div className="tm-stat-icon-wrapper"><Icon name="clock" style={{ fontSize: 22 }} /></div>
                             </div>
-                            <div className="tm-stat-card tm-stat-deleted">
+                            <div className="tm-stat-card tm-stat-inprogress">
                                 <div className="tm-stat-info">
-                                    <span className="tm-stat-number">{deletedTasks.length}</span>
-                                    <span className="tm-stat-label">Deleted</span>
+                                    <span className="tm-stat-number">{inProgressTasks.length}</span>
+                                    <span className="tm-stat-label">In Progress</span>
                                 </div>
-                                <div className="tm-stat-icon-wrapper"><Icon name="trash-alt" style={{ fontSize: 22 }} /></div>
+                                <div className="tm-stat-icon-wrapper"><Icon name="spinner" style={{ fontSize: 22 }} /></div>
+                            </div>
+                            <div className="tm-stat-card tm-stat-completed">
+                                <div className="tm-stat-info">
+                                    <span className="tm-stat-number">{completedTasks.length}</span>
+                                    <span className="tm-stat-label">Completed</span>
+                                </div>
+                                <div className="tm-stat-icon-wrapper"><Icon name="check-circle" style={{ fontSize: 22 }} /></div>
+                            </div>
+                            <div className="tm-stat-card tm-stat-overdue">
+                                <div className="tm-stat-info">
+                                    <span className="tm-stat-number">{overdueTasks.length}</span>
+                                    <span className="tm-stat-label">Overdue</span>
+                                </div>
+                                <div className="tm-stat-icon-wrapper"><Icon name="exclamation-triangle" style={{ fontSize: 22 }} /></div>
                             </div>
                         </div>
                     )}
@@ -507,6 +623,34 @@ function TaskManager({ onLogout }) {
                                         onChange={e => setDescription(e.target.value)}
                                         disabled={!backendOnline}
                                     />
+                                </div>
+                                {/* Priority + Due Date (Fig 7 / Fig 11) */}
+                                <div className="tm-group-row">
+                                    <div className="tm-group">
+                                        <label className="tm-field-label" htmlFor="task-priority-input">Priority</label>
+                                        <select
+                                            id="task-priority-input"
+                                            className="tm-input tm-select"
+                                            value={priority}
+                                            onChange={e => setPriority(e.target.value)}
+                                            disabled={!backendOnline}
+                                        >
+                                            <option value="low">Low</option>
+                                            <option value="medium">Medium</option>
+                                            <option value="high">High</option>
+                                        </select>
+                                    </div>
+                                    <div className="tm-group">
+                                        <label className="tm-field-label" htmlFor="task-due-input">Due Date</label>
+                                        <input
+                                            id="task-due-input"
+                                            type="date"
+                                            className="tm-input tm-date"
+                                            value={dueDate}
+                                            onChange={e => setDueDate(e.target.value)}
+                                            disabled={!backendOnline}
+                                        />
+                                    </div>
                                 </div>
                                 <button
                                     id="create-task-btn"
@@ -581,6 +725,29 @@ function TaskManager({ onLogout }) {
                                                         onChange={e => setEditDesc(e.target.value)}
                                                         rows={3}
                                                     />
+                                                    <div className="tm-group-row">
+                                                        <div className="tm-group">
+                                                            <label className="tm-field-label">Priority</label>
+                                                            <select
+                                                                className="tm-input tm-select"
+                                                                value={editPriority}
+                                                                onChange={e => setEditPriority(e.target.value)}
+                                                            >
+                                                                <option value="low">Low</option>
+                                                                <option value="medium">Medium</option>
+                                                                <option value="high">High</option>
+                                                            </select>
+                                                        </div>
+                                                        <div className="tm-group">
+                                                            <label className="tm-field-label">Due Date</label>
+                                                            <input
+                                                                type="date"
+                                                                className="tm-input tm-date"
+                                                                value={editDueDate}
+                                                                onChange={e => setEditDueDate(e.target.value)}
+                                                            />
+                                                        </div>
+                                                    </div>
                                                     <div className="tm-edit-actions">
                                                         <button className="tm-btn tm-btn-save" onClick={() => saveEdit(task.id)}>
                                                             <Icon name="save" /> Save
@@ -595,17 +762,32 @@ function TaskManager({ onLogout }) {
                                                 <>
                                                     <div className="tm-card-header">
                                                         <span className="tm-task-id-badge">#{task.id.slice(-6)}</span>
-                                                        <span className={`tm-status-badge badge-${task.status}`}>
-                                                            {task.status === 'pending' ? <><Icon name="clock" /> PENDING</> :
-                                                                task.status === 'completed' ? <><Icon name="check-circle" /> DONE</> :
-                                                                    <><Icon name="trash-alt" /> DELETED</>}
+                                                        <span className="tm-priority-badge" style={{ background: PRIORITY_COLOR[task.priority] || PRIORITY_COLOR.medium }}>
+                                                            <Icon name="flag" style={{ marginRight: 4 }} />{(task.priority || 'medium').toUpperCase()}
                                                         </span>
+                                                        {task.overdue ? (
+                                                            <span className="tm-status-badge badge-overdue">
+                                                                <Icon name="exclamation-triangle" /> OVERDUE
+                                                            </span>
+                                                        ) : (
+                                                            <span className={`tm-status-badge badge-${task.status}`}>
+                                                                {task.status === 'pending' ? <><Icon name="clock" /> PENDING</> :
+                                                                    task.status === 'inprogress' ? <><Icon name="spinner" /> IN PROGRESS</> :
+                                                                        task.status === 'completed' ? <><Icon name="check-circle" /> DONE</> :
+                                                                            <><Icon name="trash-alt" /> DELETED</>}
+                                                            </span>
+                                                        )}
                                                     </div>
                                                     <h3 className="tm-task-title">{task.title}</h3>
                                                     {task.description && <p className="tm-task-desc">{task.description}</p>}
 
-                                                    {/* Timestamps */}
+                                                    {/* Due date + Timestamps */}
                                                     <div className="tm-timestamps">
+                                                        {task.dueDate && (
+                                                            <span style={{ color: task.overdue ? '#e63946' : undefined }}>
+                                                                <Icon name="calendar" style={{ marginRight: 4, fontSize: '0.7rem' }} />Due: {fmtDateOnly(task.dueDate)}
+                                                            </span>
+                                                        )}
                                                         <span><Icon name="plus" style={{ marginRight: 4, fontSize: '0.7rem' }} />Added: {fmt(task.createdAt)}</span>
                                                         {task.completedAt && <span><Icon name="check" style={{ marginRight: 4, fontSize: '0.7rem', color: '#4cc9a1' }} />Completed: {fmt(task.completedAt)}</span>}
                                                         {task.deletedAt && <span><Icon name="trash" style={{ marginRight: 4, fontSize: '0.7rem', color: '#e63946' }} />Deleted: {fmt(task.deletedAt)}</span>}
@@ -619,9 +801,15 @@ function TaskManager({ onLogout }) {
                                                                     <button className="tm-btn tm-btn-edit" onClick={() => startEdit(task)}>
                                                                         <Icon name="edit" /> Edit
                                                                     </button>
-                                                                    <button className="tm-btn tm-btn-toggle" onClick={() => toggleStatus(task)}>
-                                                                        <Icon name="check" /> Complete
-                                                                    </button>
+                                                                    {task.status === 'pending' ? (
+                                                                        <button className="tm-btn tm-btn-toggle" onClick={() => toggleStatus(task)}>
+                                                                            <Icon name="play" /> Start
+                                                                        </button>
+                                                                    ) : (
+                                                                        <button className="tm-btn tm-btn-toggle" onClick={() => toggleStatus(task)}>
+                                                                            <Icon name="check" /> Complete
+                                                                        </button>
+                                                                    )}
                                                                 </>
                                                             ) : null}
                                                             <button className="tm-btn tm-btn-delete" onClick={() => deleteTask(task)}>
@@ -652,6 +840,76 @@ function TaskManager({ onLogout }) {
                         </div>
                     </div>
                 </div>
+
+                {/* ── Export Dialog (Fig 10) ─────────────────────────────────── */}
+                {showExport && (
+                    <div className="tm-modal-overlay" onClick={() => !exporting && setShowExport(false)}>
+                        <div className="tm-modal" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="export-title">
+                            <div className="tm-modal-header">
+                                <h3 id="export-title"><Icon name="file-pdf" style={{ marginRight: 8 }} /> Export Tasks Report</h3>
+                                <button className="tm-modal-close" onClick={() => setShowExport(false)} disabled={exporting} aria-label="Close">✕</button>
+                            </div>
+                            <p className="tm-modal-subtitle">Generate a PDF report of your tasks with optional filtering.</p>
+
+                            <form onSubmit={handleExportSubmit} className="tm-export-form">
+                                <div className="tm-export-group">
+                                    <label className="tm-field-label">Date Range</label>
+                                    <div className="tm-group-row">
+                                        <input
+                                            type="date"
+                                            className="tm-input tm-date"
+                                            value={exportFrom}
+                                            onChange={e => setExportFrom(e.target.value)}
+                                            aria-label="From date"
+                                        />
+                                        <input
+                                            type="date"
+                                            className="tm-input tm-date"
+                                            value={exportTo}
+                                            onChange={e => setExportTo(e.target.value)}
+                                            aria-label="To date"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="tm-export-group">
+                                    <label className="tm-field-label" htmlFor="export-status">Task Status</label>
+                                    <select
+                                        id="export-status"
+                                        className="tm-input tm-select"
+                                        value={exportStatus}
+                                        onChange={e => setExportStatus(e.target.value)}
+                                    >
+                                        <option value="all">All Statuses</option>
+                                        <option value="pending">Pending</option>
+                                        <option value="inprogress">In Progress</option>
+                                        <option value="completed">Completed</option>
+                                        <option value="overdue">Overdue</option>
+                                        <option value="deleted">Deleted</option>
+                                    </select>
+                                </div>
+
+                                <p className="tm-export-note">
+                                    <Icon name="info-circle" style={{ marginRight: 6 }} />
+                                    The PDF will include task details, dates, statuses, and descriptions.
+                                </p>
+
+                                <div className="tm-modal-actions">
+                                    <button type="button" className="tm-btn tm-btn-cancel" onClick={() => setShowExport(false)} disabled={exporting}>
+                                        Cancel
+                                    </button>
+                                    <button type="submit" className="tm-pdf-btn" disabled={exporting}>
+                                        {exporting ? (
+                                            <><span className="tm-btn-spinner"></span> Exporting...</>
+                                        ) : (
+                                            <><Icon name="download" style={{ marginRight: 6 }} /> Export</>
+                                        )}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
             </section>
         </div>
     );

@@ -1,7 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ForgotPassword from './ForgotPassword';
 
 const AUTH_API = '/api/auth';
+
+// Google Client ID (public — safe to expose in the browser bundle).
+// Set VITE_GOOGLE_CLIENT_ID in .env; the button hides itself if unset.
+const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID || '').trim();
 
 function AuthPage({ onLogin }) {
     const [activeTab, setActiveTab] = useState('login');
@@ -9,6 +13,63 @@ function AuthPage({ onLogin }) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    const googleBtnRef = useRef(null);
+
+    // ── Google Sign-In (Fig 5) ────────────────────────────────────────────────
+    const handleGoogleCredential = async (credential) => {
+        setLoading(true);
+        clearErrors();
+        try {
+            const res = await fetch(`${AUTH_API}/google`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ credential }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.message || 'Google sign-in failed.');
+                return;
+            }
+            localStorage.setItem('tm_token', data.token);
+            localStorage.setItem('tm_user', JSON.stringify(data.user));
+            onLogin(data.user, data.token);
+        } catch {
+            setError('Connection failed. Make sure the server is running.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (!GOOGLE_CLIENT_ID) return;
+
+        // Load the Google Identity Services script once
+        const initGoogle = () => {
+            if (!window.google || !googleBtnRef.current) return;
+            window.google.accounts.id.initialize({
+                client_id: GOOGLE_CLIENT_ID,
+                callback: (response) => handleGoogleCredential(response.credential),
+            });
+            window.google.accounts.id.renderButton(googleBtnRef.current, {
+                theme: 'outline',
+                size: 'large',
+                width: 320,
+                text: 'continue_with',
+            });
+        };
+
+        if (window.google) {
+            initGoogle();
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://accounts.google.com/gsi/client';
+        script.async = true;
+        script.defer = true;
+        script.onload = initGoogle;
+        document.head.appendChild(script);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Login state
     const [loginEmail, setLoginEmail] = useState('');
@@ -227,6 +288,14 @@ function AuthPage({ onLogin }) {
                                 <><i className="fas fa-sign-in-alt"></i> Log In</>
                             )}
                         </button>
+
+                        {/* Google Sign-In (Fig 5) — only shown when a Client ID is configured */}
+                        {GOOGLE_CLIENT_ID && (
+                            <div className="auth-divider">
+                                <span>Or continue with</span>
+                            </div>
+                        )}
+                        {GOOGLE_CLIENT_ID && <div ref={googleBtnRef} className="google-btn-container"></div>}
 
                         <p className="auth-switch-text">
                             Don't have an account?{' '}

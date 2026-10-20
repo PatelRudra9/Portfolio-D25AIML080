@@ -4,10 +4,16 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const { JWT_SECRET } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Google OAuth client (used to verify ID tokens from the "Continue with Google"
+// button). Reads VITE's sibling GOOGLE_CLIENT_ID env var on the server side.
+const googleClientId = process.env.GOOGLE_CLIENT_ID || '';
+const googleClient = googleClientId ? new OAuth2Client(googleClientId) : null;
 
 // ── Helper: generate JWT ──────────────────────────────────────────────────────
 const generateToken = (user) => {
@@ -45,6 +51,47 @@ const createTransporter = async () => {
     });
 };
 
+// ── Helper: send welcome email after registration ────────────────────────────
+const sendWelcomeEmail = async (user) => {
+    const fromName = process.env.EMAIL_FROM_NAME || 'Task Manager';
+    const mailOptions = {
+        from: `"${fromName}" <${process.env.EMAIL_USER || 'noreply@taskmanager.com'}>`,
+        to: user.email,
+        subject: 'Welcome to Task Manager - Your Account Has Been Created!',
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto; padding: 30px; background: #1a1a2e; border-radius: 16px; color: #e0e0ff;">
+                <h2 style="color: #4361ee; margin-bottom: 20px;">👋 Welcome to Task Manager!</h2>
+                <p>Dear <strong>${user.fullName}</strong>,</p>
+                <p>Thank you for registering with Task Manager. Your account has been created successfully.</p>
+                <table style="width: 100%; margin: 20px 0; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 8px 0; color: #a0a0b8;">Username:</td>
+                        <td style="padding: 8px 0;"><strong>${user.fullName}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 0; color: #a0a0b8;">Email:</td>
+                        <td style="padding: 8px 0;"><strong>${user.email}</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 0; color: #a0a0b8;">Account Status:</td>
+                        <td style="padding: 8px 0; color: #4cc9a1;"><strong>Active</strong></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px 0; color: #a0a0b8;">Registration Date:</td>
+                        <td style="padding: 8px 0;"><strong>${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</strong></td>
+                    </tr>
+                </table>
+                <p style="color: #a0a0b8; font-size: 14px;">Please keep this email for your records. You can now log in to your account and start managing your tasks.</p>
+            </div>
+        `,
+    };
+
+    const transporter = await createTransporter();
+    const info = await transporter.sendMail(mailOptions);
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) console.log(`📧 Welcome email preview URL: ${previewUrl}`);
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  POST /auth/register
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,6 +127,12 @@ router.post('/register', async (req, res, next) => {
         });
 
         const token = generateToken(user);
+
+        // Send welcome email (Fig 6) — fire-and-forget so a slow/unreachable SMTP
+        // server never blocks or fails the actual registration response.
+        sendWelcomeEmail(user).catch(err => {
+            console.error('Welcome email failed:', err.message);
+        });
 
         res.status(201).json({
             success: true,
@@ -126,6 +179,73 @@ router.post('/login', async (req, res, next) => {
             user: { id: user._id, fullName: user.fullName, email: user.email },
         });
     } catch (err) { next(err); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  POST /auth/google  → verify a Google ID token and sign the user in
+//  (Fig 5: "Continue with Google")
+// ─────────────────────────────────────────────────────────────────────────────
+router.post('/google', async (req, res, next) => {
+    try {
+        const { credential } = req.body;
+
+        if (!credential || typeof credential !== 'string') {
+            return res.status(400).json({ error: 'Validation Error', message: 'Google credential is required.' });
+        }
+        if (!googleClient) {
+            return res.status(503).json({
+                error: 'Not Configured',
+                message: 'Google Sign-In is not configured on the server. Set GOOGLE_CLIENT_ID.',
+            });
+        }
+
+        // Verify the ID token with Google (checks signature + audience)
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: googleClientId,
+        });
+        const payload = ticket.getPayload();
+        const email = (payload.email || '').trim().toLowerCase();
+        const fullName = payload.name || email.split('@')[0] || 'Google User';
+
+        if (!email) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'Google account has no email address.' });
+        }
+
+        // Find or create the user
+        let user = await User.findOne({ email });
+        let isNewUser = false;
+
+        if (!user) {
+            isNewUser = true;
+            user = await User.create({
+                fullName,
+                email,
+                // Random unusable password — this account can only be accessed
+                // through Google Sign-In (or a password reset).
+                password: crypto.randomBytes(24).toString('hex'),
+            });
+
+            // Send welcome email (Fig 6) for first-time Google sign-ups
+            sendWelcomeEmail(user).catch(err => {
+                console.error('Welcome email failed:', err.message);
+            });
+        }
+
+        const token = generateToken(user);
+
+        res.status(200).json({
+            success: true,
+            message: isNewUser ? 'Account created and logged in via Google!' : 'Login successful!',
+            token,
+            user: { id: user._id, fullName: user.fullName, email: user.email },
+        });
+    } catch (err) {
+        if (err && /invalid|token|audience/i.test(err.message || '')) {
+            return res.status(401).json({ error: 'Unauthorized', message: 'Invalid Google credential.' });
+        }
+        next(err);
+    }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
