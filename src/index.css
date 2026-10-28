@@ -1757,6 +1757,102 @@ body {
   min-height: 120px;
 }
 
+/* ── AI Description Suggestion (✨ AI Suggest button + disclaimer banner) ── */
+.tm-desc-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.tm-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent-color);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.tm-ai-btn:hover:not(:disabled) {
+  background: rgba(var(--accent-rgb), 0.22);
+  border-color: var(--accent-color);
+  box-shadow: 0 0 14px var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+.tm-ai-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.tm-ai-btn .tm-btn-spinner {
+  width: 13px;
+  height: 13px;
+}
+
+.tm-ai-banner {
+  position: relative;
+  z-index: 2;
+  margin-top: 10px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  border: 1px dashed rgba(var(--accent-rgb), 0.45);
+  border-radius: var(--radius-sm);
+  background: rgba(var(--accent-rgb), 0.08);
+  font-size: 12.5px;
+  animation: tm-ai-fade-in 0.3s ease;
+}
+
+.tm-ai-banner-text {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.tm-ai-discard {
+  border: none;
+  background: transparent;
+  color: var(--accent-color);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: var(--transition-smooth);
+  white-space: nowrap;
+}
+
+.tm-ai-discard:hover {
+  background: rgba(var(--accent-rgb), 0.15);
+  color: var(--text-primary);
+}
+
+@keyframes tm-ai-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Glow Sweep Button Effect */
 .tm-create-btn {
   position: relative;

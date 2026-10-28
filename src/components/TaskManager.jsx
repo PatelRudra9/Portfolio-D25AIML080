@@ -5,6 +5,7 @@ import autoTable from 'jspdf-autotable';
 
 const API = '/api/tasks';
 const LOGS_API = '/api/logs';
+const AI_API = '/api/ai/suggest-description';
 
 // ── Auth helper ───────────────────────────────────────────────────────────────
 const getAuthHeaders = () => {
@@ -95,6 +96,11 @@ function TaskManager({ onLogout }) {
     const [activeTab, setActiveTab] = useState('pending');
     const [showLogs, setShowLogs] = useState(false);
 
+    // AI description suggestion (Gemini, via backend). When active, holds
+    // { text, prevDescription } so the user can discard and restore their draft.
+    const [aiLoading, setAiLoading] = useState(false);
+    const [aiSuggestion, setAiSuggestion] = useState(null);
+
     // Export dialog state (Fig 10)
     const [showExport, setShowExport] = useState(false);
     const [exportFrom, setExportFrom] = useState('');
@@ -183,6 +189,7 @@ function TaskManager({ onLogout }) {
             setDescription('');
             setPriority('medium');
             setDueDate('');
+            setAiSuggestion(null);
             fetchLogs();
             showToast('success', '✅ Task created successfully!');
             setActiveTab('pending');
@@ -192,6 +199,48 @@ function TaskManager({ onLogout }) {
         } finally {
             setSubmitting(false);
         }
+    };
+
+    // ── AI: suggest a description from the title (Gemini, called via backend) ─
+    // Errors degrade gracefully: a toast explains what happened and the form
+    // keeps working normally so the user can write the description manually.
+    const handleAiSuggest = async () => {
+        const trimmedTitle = title.trim();
+        if (!trimmedTitle) {
+            showToast('warning', '💡 Enter a task title first, then let AI draft the description.');
+            return;
+        }
+        setAiLoading(true);
+        try {
+            const res = await fetch(AI_API, {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ title: trimmedTitle }),
+                signal: AbortSignal.timeout(25000), // client-side safety net
+            });
+            if (handle401(res)) return;
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(json.message || 'AI suggestion is unavailable right now.');
+            const suggestion = (json.data && json.data.description ? json.data.description : '').trim();
+            if (!suggestion) throw new Error('The AI returned an empty suggestion. Please try again.');
+            setAiSuggestion({ text: suggestion, prevDescription: description });
+            setDescription(suggestion); // shown inside the editable description field
+            showToast('info', '✨ AI suggestion added — review it before saving.');
+        } catch (err) {
+            const msg = (err.name === 'TimeoutError' || err.name === 'AbortError')
+                ? 'The AI took too long to respond. Please try again.'
+                : (err.message || 'AI suggestion failed. You can still write the description manually.');
+            showToast('error', `🤖 ${msg}`);
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
+    // ── AI: discard the suggestion and restore the previous description ──────
+    const discardAiSuggestion = () => {
+        if (aiSuggestion) setDescription(aiSuggestion.prevDescription || '');
+        setAiSuggestion(null);
+        showToast('info', '🗑️ AI suggestion discarded.');
     };
 
     // ── Toggle status (cycles pending → in-progress → completed → pending) ────
@@ -618,11 +667,42 @@ function TaskManager({ onLogout }) {
                                     <textarea
                                         id="task-desc-input"
                                         className="tm-input tm-textarea"
-                                        placeholder="Description (optional)..."
+                                        placeholder="Description (optional)... or click ✨ AI Suggest below"
                                         value={description}
                                         onChange={e => setDescription(e.target.value)}
                                         disabled={!backendOnline}
                                     />
+                                    <div className="tm-desc-footer">
+                                        <button
+                                            id="ai-suggest-btn"
+                                            type="button"
+                                            className="tm-ai-btn"
+                                            onClick={handleAiSuggest}
+                                            disabled={!backendOnline || aiLoading || !title.trim()}
+                                            title="Generate a description from the task title using AI"
+                                        >
+                                            {aiLoading ? (
+                                                <><span className="tm-btn-spinner"></span> Generating…</>
+                                            ) : (
+                                                <><Icon name="wand-magic-sparkles" style={{ marginRight: 6 }} /> AI Suggest</>
+                                            )}
+                                        </button>
+                                    </div>
+                                    {aiSuggestion && (
+                                        <div className="tm-ai-banner" role="status">
+                                            <span className="tm-ai-banner-text">
+                                                <Icon name="circle-info" style={{ marginRight: 6 }} />
+                                                AI-generated suggestion. Please review before saving.
+                                            </span>
+                                            <button
+                                                type="button"
+                                                className="tm-ai-discard"
+                                                onClick={discardAiSuggestion}
+                                            >
+                                                <Icon name="xmark" style={{ marginRight: 4 }} /> Discard suggestion
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                                 {/* Priority + Due Date (Fig 7 / Fig 11) */}
                                 <div className="tm-group-row">

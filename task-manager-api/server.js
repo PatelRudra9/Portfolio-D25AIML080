@@ -6,6 +6,7 @@ require('dotenv').config();
 
 const { authMiddleware } = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
+const aiRoutes = require('./routes/ai');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -90,6 +91,11 @@ app.use((req, res, next) => {
 //  Auth Routes (public — no middleware)
 // ─────────────────────────────────────────────
 app.use('/auth', authRoutes);
+
+// ─────────────────────────────────────────────
+//  AI Routes (protected — Gemini key stays server-side)
+// ─────────────────────────────────────────────
+app.use('/ai', aiRoutes);
 
 // ─────────────────────────────────────────────
 //  Validate Task ID
@@ -333,7 +339,7 @@ if (require.main === module) {
     app.listen(PORT, () => {
         console.log(`Task Manager API running on http://localhost:${PORT}`);
         console.log('Endpoints: POST /auth/register, POST /auth/login, POST /auth/google, POST /auth/forgot-password, POST /auth/reset-password');
-        console.log('Protected: GET|POST /tasks, GET|PUT|DELETE /tasks/:id, GET|POST /logs');
+        console.log('Protected: GET|POST /tasks, GET|PUT|DELETE /tasks/:id, GET|POST /logs, POST /ai/suggest-description');
     });
 }
 

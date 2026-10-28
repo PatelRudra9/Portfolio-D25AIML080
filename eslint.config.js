@@ -5,7 +5,9 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // 'task-manager-api' is a separate CommonJS Node backend with its own
+  // package.json — the frontend lint config (browser globals) doesn't apply.
+  globalIgnores(['dist', 'task-manager-api']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
