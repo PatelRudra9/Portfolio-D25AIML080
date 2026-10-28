@@ -201,9 +201,10 @@ function TaskManager({ onLogout }) {
         }
     };
 
-    // ── AI: suggest a description from the title (Gemini, called via backend) ─
-    // Errors degrade gracefully: a toast explains what happened and the form
-    // keeps working normally so the user can write the description manually.
+    // ── AI: suggest a description from the title (Gemini/Groq/OpenAI via backend) ─
+    // Errors degrade gracefully: a modal or toast explains what happened and
+    // the form keeps working so the user can write the description manually.
+    // Rate-limit (429) responses use a SweetAlert2 modal matching the spec screenshot.
     const handleAiSuggest = async () => {
         const trimmedTitle = title.trim();
         if (!trimmedTitle) {
@@ -220,11 +221,30 @@ function TaskManager({ onLogout }) {
             });
             if (handle401(res)) return;
             const json = await res.json().catch(() => ({}));
+
+            // ── 429 Rate Limited → show the modal from the spec ──────────────
+            if (res.status === 429) {
+                const limitMsg = json.message ||
+                    'You can generate an AI description once per minute per task. Please wait before requesting again.';
+                await Swal.fire({
+                    title: 'AI Generation',
+                    html: `<p style="color:#a0a0b8;margin:0 0 4px">${limitMsg}</p>`,
+                    icon: 'error',
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#4361ee',
+                    footer: '<span style="color:#a0a0b8;font-size:0.85rem">You can continue and write a description manually.</span>',
+                    background: '#1a1a2e',
+                    color: '#e0e0ff',
+                    customClass: { popup: 'tm-swal-popup' },
+                });
+                return; // leave the form intact — user can type manually
+            }
+
             if (!res.ok) throw new Error(json.message || 'AI suggestion is unavailable right now.');
             const suggestion = (json.data && json.data.description ? json.data.description : '').trim();
             if (!suggestion) throw new Error('The AI returned an empty suggestion. Please try again.');
             setAiSuggestion({ text: suggestion, prevDescription: description });
-            setDescription(suggestion); // shown inside the editable description field
+            setDescription(suggestion); // lands in the editable description textarea
             showToast('info', '✨ AI suggestion added — review it before saving.');
         } catch (err) {
             const msg = (err.name === 'TimeoutError' || err.name === 'AbortError')
